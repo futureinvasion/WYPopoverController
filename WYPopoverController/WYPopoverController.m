@@ -1874,7 +1874,8 @@ static WYPopoverTheme *defaultTheme_ = nil;
         permittedArrowDirections:aArrowDirections
                         animated:aAnimated
                          options:WYPopoverAnimationOptionFade
-                      completion:completion];
+                      completion:completion
+                         overlay:YES];
 }
 
 - (void)presentPopoverFromRect:(CGRect)aRect
@@ -1888,7 +1889,8 @@ static WYPopoverTheme *defaultTheme_ = nil;
         permittedArrowDirections:aArrowDirections
                         animated:aAnimated
                          options:aOptions
-                      completion:nil];
+                      completion:nil
+                         overlay:YES];
 }
 
 - (void)presentPopoverFromRect:(CGRect)aRect
@@ -1936,6 +1938,173 @@ static WYPopoverTheme *defaultTheme_ = nil;
         
         [inView.window addSubview:backgroundView];
         [inView.window insertSubview:overlayView belowSubview:backgroundView];
+    }
+    
+    [self updateThemeUI];
+    
+    __weak __typeof__(self) weakSelf = self;
+    
+    void (^completionBlock)(BOOL) = ^(BOOL animated) {
+        
+        __typeof__(self) strongSelf = weakSelf;
+        
+        if (strongSelf)
+        {
+            if ([strongSelf->viewController isKindOfClass:[UINavigationController class]] == NO)
+            {
+                [strongSelf->viewController viewDidAppear:YES];
+            }
+            
+            if ([strongSelf->viewController respondsToSelector:@selector(preferredContentSize)])
+            {
+                [strongSelf->viewController addObserver:self forKeyPath:NSStringFromSelector(@selector(preferredContentSize)) options:0 context:nil];
+            }
+            else
+            {
+                [strongSelf->viewController addObserver:self forKeyPath:NSStringFromSelector(@selector(contentSizeForViewInPopover)) options:0 context:nil];
+            }
+            
+            strongSelf->backgroundView.appearing = NO;
+        }
+        
+        if (completion)
+        {
+            completion();
+        }
+        else if (strongSelf && strongSelf->delegate && [strongSelf->delegate respondsToSelector:@selector(popoverControllerDidPresentPopover:)])
+        {
+            [strongSelf->delegate popoverControllerDidPresentPopover:strongSelf];
+        }
+        
+        
+    };
+    
+    void (^adjustTintDimmed)() = ^() {
+#ifdef WY_BASE_SDK_7_ENABLED
+        if ([inView.window respondsToSelector:@selector(setTintAdjustmentMode:)]) {
+            for (UIView *subview in inView.window.subviews) {
+                if (subview != backgroundView) {
+                    [subview setTintAdjustmentMode:UIViewTintAdjustmentModeDimmed];
+                }
+            }
+        }
+#endif
+    };
+    
+    backgroundView.hidden = NO;
+    
+    if (animated)
+    {
+        if ((options & WYPopoverAnimationOptionFade) == WYPopoverAnimationOptionFade)
+        {
+            overlayView.alpha = 0;
+            backgroundView.alpha = 0;
+        }
+        
+        [viewController viewWillAppear:YES];
+        
+        CGAffineTransform endTransform = backgroundView.transform;
+        
+        if ((options & WYPopoverAnimationOptionScale) == WYPopoverAnimationOptionScale)
+        {
+            CGAffineTransform startTransform = [self transformForArrowDirection:backgroundView.arrowDirection];
+            backgroundView.transform = startTransform;
+        }
+        
+        [UIView animateWithDuration:animationDuration animations:^{
+            __typeof__(self) strongSelf = weakSelf;
+            
+            if (strongSelf)
+            {
+                strongSelf->overlayView.alpha = 1;
+                strongSelf->backgroundView.alpha = 1;
+                strongSelf->backgroundView.transform = endTransform;
+            }
+            adjustTintDimmed();
+        } completion:^(BOOL finished) {
+            completionBlock(YES);
+        }];
+    }
+    else
+    {
+        adjustTintDimmed();
+        [viewController viewWillAppear:NO];
+        completionBlock(NO);
+    }
+    
+    if (isListeningNotifications == NO)
+    {
+        isListeningNotifications = YES;
+        
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(didChangeStatusBarOrientation:)
+                                                     name:UIApplicationDidChangeStatusBarOrientationNotification
+                                                   object:nil];
+        
+        [[UIDevice currentDevice] beginGeneratingDeviceOrientationNotifications];
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(didChangeDeviceOrientation:)
+                                                     name:UIDeviceOrientationDidChangeNotification
+                                                   object:nil];
+        
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(keyboardWillShow:)
+                                                     name:UIKeyboardWillShowNotification object:nil];
+        
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(keyboardWillHide:)
+                                                     name:UIKeyboardWillHideNotification object:nil];
+    }
+}
+
+- (void)presentPopoverFromRect:(CGRect)aRect
+                        inView:(UIView *)aView
+      permittedArrowDirections:(WYPopoverArrowDirection)aArrowDirections
+                      animated:(BOOL)aAnimated
+                       options:(WYPopoverAnimationOptions)aOptions
+                    completion:(void (^)(void))completion
+                       overlay:(BOOL)overlay
+{
+    NSAssert((aArrowDirections != WYPopoverArrowDirectionUnknown), @"WYPopoverArrowDirection must not be UNKNOWN");
+    
+    rect = aRect;
+    inView = aView;
+    permittedArrowDirections = aArrowDirections;
+    animated = aAnimated;
+    options = aOptions;
+    
+    if (!inView)
+    {
+        inView = [UIApplication sharedApplication].keyWindow.rootViewController.view;
+        if (CGRectIsEmpty(rect))
+        {
+            rect = CGRectMake((int)inView.bounds.size.width / 2 - 5, (int)inView.bounds.size.height / 2 - 5, 10, 10);
+        }
+    }
+    
+    CGSize contentViewSize = self.popoverContentSize;
+    
+    if (overlayView == nil)
+    {
+        overlayView = [[WYPopoverOverlayView alloc] initWithFrame:inView.window.bounds];
+        overlayView.autoresizesSubviews = NO;
+        overlayView.isAccessibilityElement = YES;
+        overlayView.accessibilityTraits = UIAccessibilityTraitNone;
+        overlayView.delegate = self;
+        overlayView.passthroughViews = passthroughViews;
+        
+        backgroundView = [[WYPopoverBackgroundView alloc] initWithContentSize:contentViewSize];
+        backgroundView.appearing = YES;
+        backgroundView.isAccessibilityElement = YES;
+        backgroundView.accessibilityTraits = UIAccessibilityTraitNone;
+        
+        backgroundView.delegate = self;
+        backgroundView.hidden = YES;
+        
+        [inView.window addSubview:backgroundView];
+        if (overlay) {
+            [inView.window insertSubview:overlayView belowSubview:backgroundView];
+        }
     }
     
     [self updateThemeUI];
