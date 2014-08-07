@@ -128,13 +128,6 @@ typedef NS_OPTIONS(NSUInteger, WYPopoverAnimationOptions) {
                         inView:(UIView *)view
       permittedArrowDirections:(WYPopoverArrowDirection)arrowDirections
                       animated:(BOOL)animated
-                       options:(WYPopoverAnimationOptions)options
-                       overlay:(BOOL)overlay;
-
-- (void)presentPopoverFromRect:(CGRect)rect
-                        inView:(UIView *)view
-      permittedArrowDirections:(WYPopoverArrowDirection)arrowDirections
-                      animated:(BOOL)animated
                     completion:(void (^)(void))completion;
 
 - (void)presentPopoverFromRect:(CGRect)rect
